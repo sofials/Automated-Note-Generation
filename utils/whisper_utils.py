@@ -1,35 +1,41 @@
+import whisper
 import time
-import torch
-from faster_whisper import WhisperModel
-from utils.audio_utils import get_audio_duration_wav  # Assicurati che sia importato
+import streamlit as st
+from utils.audio_utils import split_audio  # Usa la funzione che spezza l'audio in blocchi
 
-def transcribe_whisper(audio_path, language="it", model_size="medium", progress_callback=None):
+def transcribe_whisper_blocks(audio_path, language="it", model_size="medium", progress_callback=None, chunk_duration=30):
     try:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        compute_type = "float16" if device == "cuda" else "int8"
+        model = whisper.load_model(model_size)
+        chunk_paths = split_audio(audio_path, chunk_duration)  # blocchi .wav
 
-        model = WhisperModel(model_size, device=device, compute_type=compute_type)
-        total_duration = get_audio_duration_wav(audio_path)
+        all_texts = []
+        total_chunks = len(chunk_paths)
 
-        start = time.time()
-        segments_gen, info = model.transcribe(audio_path, language=language, beam_size=5)
+        start_time = time.time()
+        for i, chunk_path in enumerate(chunk_paths, start=1):
+            result = model.transcribe(chunk_path, language=language)
+            text = result["text"].strip()
 
-        segments = []
-        for seg in segments_gen:
-            segments.append(seg)
+            # 💾 Salva blocco singolo
+            txt_path = chunk_path.replace(".wav", ".txt")
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write(text)
+
+            all_texts.append(text)
+
             if progress_callback:
-                percent = min(seg.end / total_duration, 1.0)
-                progress_callback(percent)
+                progress_callback(i / total_chunks)
 
-        end = time.time()
-        text = "\n".join([seg.text for seg in segments])
+        final_text = "\n\n".join(all_texts)
 
-        txt_path = audio_path.replace(".wav", ".txt")
-        with open(txt_path, "w", encoding="utf-8") as f:
-            f.write(text)
+        # 💾 Salva file unico
+        final_path = audio_path.replace(".wav", "_final.txt")
+        with open(final_path, "w", encoding="utf-8") as f:
+            f.write(final_text)
 
-        return text, end - start
+        end_time = time.time()
+        return final_text, end_time - start_time
 
     except Exception as e:
-        print(f"❌ Errore Faster-Whisper: {e}")
+        st.error(f"❌ Errore trascrizione blocchi Whisper: {e}")
         return "", 0
