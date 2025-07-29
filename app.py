@@ -1,92 +1,91 @@
 import streamlit as st
+from utils.whisper_utils import transcribe_whisper_blocks
+from utils.reformulate_utils import reformulate_transcription
+from utils.audio_utils import load_audio_file, extract_audio
+from utils.pdf_utils import save_pdf
 import os
-from utils.audio_utils import extract_audio
-from utils.whisper_utils import transcribe_whisper_blocks  # ← usa blocchi!
+import sys
 
-# 🧹 Pulizia controllata
-for f in ["input_video.mp4", "temp_audio.wav"]:
-    if os.path.exists(f):
-        os.remove(f)
+sys.path.append(os.path.abspath("."))
 
-st.set_page_config(page_title="WhisperNotes", page_icon="🧠")
-st.title("🎓 WhisperNotes – Appunti da Videolezioni")
-st.markdown("Carica un video, scegli il modello Whisper e ottieni la trascrizione!")
+st.set_page_config(page_title="🧠 Appunti Universitari", layout="wide")
+st.title("📚 Trascrizione & Appunti Universitari")
 
-# 🔧 Sidebar
-st.sidebar.title("⚙️ Impostazioni")
-model_choice = st.sidebar.selectbox("Modello Whisper", ["tiny", "base", "medium", "large"])
-chunk_duration = st.sidebar.slider("Durata blocco (sec)", min_value=10, max_value=120, value=30)
+# 📁 Upload audio/video file
+uploaded_file = st.file_uploader("🎙️ Carica file audio o video", type=["mp3", "wav", "m4a", "mp4"])
+formal_level = st.selectbox("🎓 Livello di formalità", ["Medio", "Alto", "Molto Alto"])
+add_sections = st.checkbox("🧩 Organizza in sottosezioni con titoletti")
+compare_blocks = st.checkbox("🔍 Mostra confronto: parlato vs appunti")
+generate_notes = st.checkbox("✏️ Riformula trascrizione in appunti scritti")
 
-# 📽️ Upload video
-video_file = st.file_uploader("📽️ Carica video", type=["mp4", "mov", "avi"])
-if video_file:
-    video_path = "input_video.mp4"
-    with st.spinner("💾 Salvataggio video..."):
-        with open(video_path, "wb") as f:
-            f.write(video_file.read())
+# 👉 Parametri Whisper
+model_size = st.selectbox("🧠 Modello Whisper", ["tiny", "base", "small", "medium", "large"], index=3)
+chunk_duration = st.slider("⏱️ Durata blocchi audio (sec)", min_value=10, max_value=120, value=30, step=10)
 
-    audio_path = "temp_audio.wav"
-    with st.spinner("🎧 Estrazione audio..."):
-        success, audio_time = extract_audio(video_path, audio_path)
+if uploaded_file:
+    st.audio(uploaded_file)
 
-    if success:
-        st.success(f"✅ Audio estratto in {audio_time:.2f} secondi")
-        progress = st.progress(0)
-        status = st.empty()
+    file_name = uploaded_file.name
+    extension = file_name.split(".")[-1].lower()
+    temp_input_path = f"temp_input.{extension}"
 
-        def update_progress(p):
-            percent = int(p * 100)
-            progress.progress(p)
-            status.text(f"⏳ Trascrizione in corso... {percent}% completata")
+    with open(temp_input_path, "wb") as f:
+        f.write(uploaded_file.read())
 
-        # 🧠 Trascrizione a blocchi
-        transcription, trans_time = transcribe_whisper_blocks(
-            audio_path,
-            model_size=model_choice,
-            progress_callback=update_progress,
-            chunk_duration=chunk_duration
+    if extension == "mp4":
+        temp_audio_path = "temp_audio.wav"
+        success, _ = extract_audio(temp_input_path, temp_audio_path)
+        if not success:
+            st.error("❌ Impossibile estrarre audio dal video.")
+            st.stop()
+    else:
+        temp_audio_path = load_audio_file(open(temp_input_path, "rb"))
+
+    progress_bar = st.progress(0)
+
+    def update_progress(pct):
+        progress_bar.progress(pct)
+
+    with st.spinner("🎧 Trascrizione in corso..."):
+        transcription, _ = transcribe_whisper_blocks(
+            temp_audio_path,
+            model_size=model_size,
+            chunk_duration=chunk_duration,
+            progress_callback=update_progress
         )
 
-        progress.empty()
-        status.empty()
+    st.text_area("📃 Trascrizione (grezza)", transcription, height=300)
 
-        final_txt_path = audio_path.replace(".wav", "_final.txt")
-        if os.path.exists(final_txt_path):
-            try:
-                with open(final_txt_path, "r", encoding="utf-8") as f:
-                    full_text = f.read()
-            except Exception as e:
-                st.error(f"❌ Errore lettura file finale: {e}")
-                full_text = ""
+    if generate_notes and transcription:
+        with st.spinner("✍️ Generazione appunti..."):
+            final_notes, notes_by_block = reformulate_transcription(
+                transcription,
+                formal_level=formal_level,
+                use_sections=add_sections
+            )
 
-            if full_text.strip():
-                st.success(f"✅ Trascrizione completata in {trans_time:.2f} secondi")
-                st.text_area("📝 Trascrizione finale", full_text, height=300)
-                st.download_button("💾 Scarica trascrizione completa", full_text, file_name="trascrizione_completa.txt", mime="text/plain")
-            else:
-                st.warning("⚠️ Il file finale è vuoto.")
-        else:
-            st.warning("⚠️ Nessun file finale trovato.")
+        st.success("✅ Appunti generati!")
+        st.text_area("📘 Appunti finali", final_notes, height=500)
 
-    else:
-        st.error("❌ Errore nell’estrazione dell’audio")
+        if compare_blocks:
+            st.subheader("🔍 Confronto blocchi")
+            for idx, (original, rewritten) in enumerate(notes_by_block):
+                st.markdown(f"**🎙️ Blocco {idx+1} - Originale**")
+                st.markdown(f"`{original.strip()}`")
+                st.markdown(f"**✏️ Riformulato**\n{rewritten.strip()}")
+                st.divider()
 
-# 🔁 Recupero manuale di un file precedente
-st.markdown("---")
-st.subheader("📄 Recupero manuale del file trascritto")
+        st.download_button("💾 Scarica Appunti .txt", final_notes, file_name="appunti.txt")
 
-manual_txt_path = "temp_audio.txt"
-if os.path.exists(manual_txt_path):
-    try:
-        with open(manual_txt_path, "r", encoding="utf-8") as f:
-            manual_text = f.read()
-        if manual_text.strip():
-            st.info(f"ℹ️ Trascrizione già presente: {len(manual_text.strip())} caratteri")
-            st.text_area("📝 Trascrizione manuale", manual_text, height=300)
-            st.download_button("💾 Scarica manualmente .txt", manual_text, file_name="trascrizione.txt", mime="text/plain")
-        else:
-            st.warning("⚠️ Il file manuale è vuoto.")
-    except Exception as e:
-        st.error(f"❌ Errore nella lettura manuale: {e}")
+        pdf_filename_notes = "appunti_riformulati.pdf"
+        save_pdf(final_notes, title="Appunti Universitari", filename=pdf_filename_notes)
+        with open(pdf_filename_notes, "rb") as file:
+            st.download_button("📘 Scarica PDF Appunti", file, file_name=pdf_filename_notes, mime="application/pdf")
+
+    pdf_filename_transcription = "trascrizione.pdf"
+    save_pdf(transcription, title="Trascrizione Lezione", filename=pdf_filename_transcription)
+    with open(pdf_filename_transcription, "rb") as file:
+        st.download_button("📄 Scarica PDF Trascrizione", file, file_name=pdf_filename_transcription, mime="application/pdf")
+
 else:
-    st.info("📂 Nessun file manuale trovato (`temp_audio.txt`)")
+    st.info("☝️ Carica un file audio o video per iniziare")
