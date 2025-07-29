@@ -1,6 +1,15 @@
 import subprocess
 import time
 import os
+import wave
+
+def get_audio_duration_wav(path):
+    with wave.open(path, "rb") as audio:
+        frames = audio.getnframes()
+        rate = audio.getframerate()
+        duration = frames / float(rate)
+        return duration  # secondi
+
 
 def extract_audio(video_path, audio_path):
     try:

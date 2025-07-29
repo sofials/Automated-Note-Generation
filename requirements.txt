@@ -1,5 +1,13 @@
-streamlit
-openai-whisper
-ffmpeg-python
-transformers
-torch
+# Requirements for the project
+streamlit==1.47.1
+ffmpeg-python==0.2.0
+transformers==4.54.0
+torch==2.1.0+cu118
+torchaudio==2.1.0+cu118
+faster-whisper==0.10.0
+ctranslate2==3.24.0
+numpy==1.25.2
+openai-whisper==20231106
+tokenizers==0.21.4
+onnxruntime==1.16.3
+av==11.0.0
