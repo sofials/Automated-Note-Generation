@@ -1,0 +1,20 @@
+import subprocess
+import time
+import os
+
+def extract_audio(video_path, audio_path):
+    try:
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+
+        start = time.time()
+        subprocess.run([
+            'ffmpeg', '-y', '-i', video_path,
+            '-vn', '-acodec', 'pcm_s16le', audio_path
+        ], check=True)
+        end = time.time()
+        return True, end - start
+
+    except Exception as e:
+        print(f"❌ Errore FFmpeg: {e}")
+        return False, 0
