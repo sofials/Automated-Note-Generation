@@ -5,6 +5,9 @@ from utils.audio_utils import split_audio
 
 def transcribe_whisper_blocks(audio_path, language="it", model_size="medium", progress_callback=None, chunk_duration=30):
     try:
+        if not os.path.exists(audio_path):
+            raise ValueError(f"Percorso audio non valido: {audio_path}")
+
         model = whisper.load_model(model_size)
         chunk_paths = split_audio(audio_path, chunk_duration)
 
@@ -15,7 +18,6 @@ def transcribe_whisper_blocks(audio_path, language="it", model_size="medium", pr
         for i, chunk_path in enumerate(chunk_paths, start=1):
             result = model.transcribe(chunk_path, language=language)
             text = result["text"].strip()
-
             all_texts.append(text)
 
             if progress_callback:

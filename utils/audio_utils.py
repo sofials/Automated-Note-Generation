@@ -47,8 +47,8 @@ def split_audio(audio_path, chunk_duration=30):
         print(f"❌ Errore split audio: {e}")
         return []
 
-def load_audio_file(uploaded_file, filename="temp/temp_audio.wav"):
+def load_audio_file(file_data, filename="temp/temp_audio.wav"):
     os.makedirs("temp", exist_ok=True)
     with open(filename, "wb") as f:
-        f.write(uploaded_file.read())
+        f.write(file_data)
     return filename
