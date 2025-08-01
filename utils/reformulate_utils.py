@@ -1,4 +1,5 @@
-from transformers import pipeline
+import requests
+import json
 import re
 import time
 import logging
@@ -7,21 +8,66 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Variabile globale per il modello (caricamento lazy)
-_reformulator = None
+# Configurazione Ollama
+OLLAMA_BASE_URL = "http://localhost:11434"
+OLLAMA_MODEL = "mistral:7b"
 
-def get_reformulator():
-    """Carica il modello di riformulazione in modo lazy"""
-    global _reformulator
-    if _reformulator is None:
-        try:
-            logger.info("Caricamento modello di riformulazione...")
-            _reformulator = pipeline("text2text-generation", model="google/flan-t5-large")
-            logger.info("Modello caricato con successo")
-        except Exception as e:
-            logger.error(f"Errore caricamento modello: {e}")
-            raise RuntimeError(f"Impossibile caricare modello di riformulazione: {e}")
-    return _reformulator
+def check_ollama_available():
+    """Verifica se Ollama è disponibile e il modello è caricato"""
+    try:
+        # Verifica se Ollama è in esecuzione
+        response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
+        if response.status_code != 200:
+            return False, "Ollama non risponde"
+        
+        # Verifica se il modello è disponibile
+        models = response.json().get("models", [])
+        model_names = [model["name"] for model in models]
+        
+        if OLLAMA_MODEL not in model_names:
+            return False, f"Modello {OLLAMA_MODEL} non trovato. Esegui: ollama pull {OLLAMA_MODEL}"
+        
+        return True, "Ollama e modello disponibili"
+        
+    except requests.exceptions.ConnectionError:
+        return False, "Ollama non in esecuzione. Avvia con: ollama serve"
+    except Exception as e:
+        return False, f"Errore verifica Ollama: {str(e)}"
+
+def call_ollama(prompt, max_tokens=1000, temperature=0.7):
+    """Chiama Ollama API per la generazione del testo"""
+    try:
+        payload = {
+            "model": OLLAMA_MODEL,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+                "top_p": 0.9,
+                "top_k": 40
+            }
+        }
+        
+        response = requests.post(
+            f"{OLLAMA_BASE_URL}/api/generate",
+            json=payload,
+            timeout=120  # 2 minuti timeout
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            return result.get("response", "").strip()
+        else:
+            logger.error(f"Errore API Ollama: {response.status_code} - {response.text}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        logger.error("Timeout chiamata Ollama")
+        return None
+    except Exception as e:
+        logger.error(f"Errore chiamata Ollama: {e}")
+        return None
 
 def clean_text(text):
     """Pulisce il testo da elementi del parlato"""
@@ -94,12 +140,18 @@ def split_chunks(text, max_chars=1500):
 
 def reformulate_transcription(text, formal_level="Medio", use_sections=False):
     """
-    Riformula la trascrizione in appunti scritti con gestione errori robusta
+    Riformula la trascrizione in appunti scritti usando Ollama Mistral:7b
     """
     if not text or not isinstance(text, str):
         return "", []
     
     try:
+        # Verifica Ollama
+        ollama_available, error_msg = check_ollama_available()
+        if not ollama_available:
+            logger.error(f"Ollama non disponibile: {error_msg}")
+            return "", []
+        
         # Pulisci il testo
         cleaned = clean_text(text)
         if not cleaned:
@@ -115,34 +167,28 @@ def reformulate_transcription(text, formal_level="Medio", use_sections=False):
         if not chunks:
             return "", []
         
-        # Ottieni il modello
-        reformulator = get_reformulator()
-        
         notes_by_block = []
         final_notes = []
         
         for i, chunk in enumerate(chunks):
             try:
-                # Crea prompt appropriato
-                prompt = f"Converti il seguente testo parlato in appunti scritti, tono {formal_level.lower()}."
+                # Crea prompt per Mistral
+                prompt = f"""<s>[INST] Converti questo testo parlato in appunti universitari formali (livello {formal_level.lower()}).
+
+Istruzioni:
+- Mantieni tutto il contenuto importante
+- Rimuovi elementi del parlato (ehm, mmm, tipo, cioè)
+- Organizza in paragrafi chiari e strutturati
+{f"- Aggiungi titoletti esplicativi per ogni sezione" if use_sections else ""}
+- Usa un linguaggio formale e accademico
+- Mantieni la coerenza logica
+
+Testo da convertire:
+{chunk} [/INST]</s>"""
                 
-                if use_sections:
-                    prompt += " Organizza in paragrafi con titoletti esplicativi."
-                
-                prompt += " Mantieni tutto il contenuto, rimuovi elementi del parlato.\nTesto:\n" + chunk
-                
-                # Esegui riformulazione con timeout
+                # Esegui riformulazione con Ollama
                 start_time = time.time()
-                output = reformulator(
-                    prompt, 
-                    max_new_tokens=512,
-                    do_sample=True,
-                    temperature=0.7,
-                    top_p=0.9
-                )
-                
-                # Estrai il testo generato
-                generated_text = output[0]['generated_text'].strip()
+                generated_text = call_ollama(prompt, max_tokens=800, temperature=0.7)
                 
                 # Valida output
                 if not generated_text or len(generated_text) < 20:

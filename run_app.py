@@ -18,7 +18,8 @@ def check_dependencies():
         "transformers",
         "torch",
         "pydub",
-        "fpdf"
+        "fpdf",
+        "requests"
     ]
     
     optional_packages = [
@@ -68,6 +69,29 @@ def check_ffmpeg():
         logger.warning("⚠️ FFmpeg non trovato - supporto video limitato")
         return False
 
+def check_ollama():
+    """Verifica che Ollama sia disponibile"""
+    try:
+        import requests
+        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+        if response.status_code == 200:
+            models = response.json().get("models", [])
+            model_names = [model["name"] for model in models]
+            if "mistral:7b" in model_names:
+                logger.info("✅ Ollama e Mistral:7b trovati")
+                return True
+            else:
+                logger.warning("⚠️ Ollama trovato ma Mistral:7b non disponibile")
+                logger.info("💡 Esegui: ollama pull mistral:7b")
+                return False
+        else:
+            logger.warning("⚠️ Ollama non risponde correttamente")
+            return False
+    except Exception as e:
+        logger.warning(f"⚠️ Ollama non disponibile: {e}")
+        logger.info("💡 Installa Ollama da: https://ollama.ai")
+        return False
+
 def cleanup_on_exit():
     """Esegue pulizia al termine dell'applicazione"""
     try:
@@ -115,6 +139,9 @@ def main():
         
         # Verifica FFmpeg
         check_ffmpeg()
+        
+        # Verifica Ollama
+        check_ollama()
         
         # Verifica file app.py
         app_file = Path("app.py")

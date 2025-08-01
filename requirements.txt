@@ -6,4 +6,5 @@ pydub>=0.25.1
 fpdf>=1.7.2
 ffmpeg-python>=0.2.0
 numpy>=1.24.0
-soundfile>=0.12.1       
+soundfile>=0.12.1
+requests>=2.31.0       
